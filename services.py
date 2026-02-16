@@ -99,9 +99,10 @@ class AIService:
     def __init__(self):
         # 1. DEFINIÇÃO DA LISTA DE MODELOS (Aqui é o lugar certo)
         self.modelos = [
-            "gemini-2.0-flash",       # Prioridade 1: O mais novo
-            "gemini-1.5-flash",       # Prioridade 2: O mais estável (Cavalo de batalha)
-            "gemini-1.5-pro",         # Prioridade 3: Inteligência extra
+            "gemini-2.0-flash",       # O novo padrão (Rápido e Inteligente)
+            "gemini-2.0-flash-lite",  # Ultra rápido (Ótimo para não travar)
+            "gemini-2.5-flash",       # Geração mais nova
+            "gemini-2.5-pro"          # Mais inteligente (Backup de luxo)
         ]
         
         # Tenta pegar chave dos Secrets (Cloud) ou Env (Local)
@@ -158,5 +159,6 @@ class AIService:
         
         # Se o loop terminar e nada funcionar:
         return "⚠️ Todos os modelos falharam (Cota Excedida).", "Falha Geral"
+
 
 
