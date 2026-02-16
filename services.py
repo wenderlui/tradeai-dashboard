@@ -94,59 +94,69 @@ class MarketDataService:
             print(f"Erro Service: {e}")
             return None
 
+# --- SERVIÇO DE IA (COM ROTAÇÃO AUTOMÁTICA CORRIGIDA) ---
 class AIService:
-    """
-    Responsável pela inteligência artificial e conexões com LLMs.
-    """
-    def consultar_gemini(self, simbolo, dados_tecnicos):
-         # Lista atualizada com seus modelos reais (Prioridade: Velocidade > Inteligência > Backup)
-        modelos = [
-            "gemini-2.0-flash",       # O novo padrão (Rápido e Inteligente)
-            "gemini-2.0-flash-lite",  # Ultra rápido (Ótimo para não travar)
-            "gemini-2.5-flash",       # Geração mais nova
-            "gemini-2.5-pro"          # Mais inteligente (Backup de luxo)
+    def __init__(self):
+        # 1. DEFINIÇÃO DA LISTA DE MODELOS (Aqui é o lugar certo)
+        self.modelos = [
+            "gemini-2.0-flash",       # Prioridade 1: O mais novo
+            "gemini-1.5-flash",       # Prioridade 2: O mais estável (Cavalo de batalha)
+            "gemini-1.5-pro",         # Prioridade 3: Inteligência extra
         ]
         
         # Tenta pegar chave dos Secrets (Cloud) ou Env (Local)
-        api_key = None
+        self.api_key = None
         try:
-            if "GEMINI_API_KEY" in st.secrets: api_key = st.secrets["GEMINI_API_KEY"]
-            else: api_key = os.getenv("GEMINI_API_KEY")
-        except: pass
+            if "GEMINI_API_KEY" in st.secrets: 
+                self.api_key = st.secrets["GEMINI_API_KEY"]
+            else: 
+                self.api_key = os.getenv("GEMINI_API_KEY")
+        except: 
+            self.api_key = os.getenv("GEMINI_API_KEY")
 
-        if not api_key:
-            return "⚠️ ERRO: Configure a GEMINI_API_KEY nos Secrets.", "Config Error"
+    def consultar_gemini(self, simbolo, dados):
+        # Verificação de segurança
+        if not self.api_key:
+            return "⚠️ Configure a GEMINI_API_KEY.", "Erro Config"
 
-        client = genai.Client(api_key=api_key)
+        if not dados or dados.get('preco', 0) == 0:
+             return "⚠️ Aguardando dados do mercado...", "Sem Dados"
+
+        # O Prompt para o Trader IA
+        prompt = f"""
+        Aja como Trader Profissional. Analise o par {simbolo}.
+        Preço Atual: ${dados['preco']}
+        RSI (14): {dados['rsi']:.1f}
+        Média EMA 21: {dados['ema21']:.2f}
+        Probabilidade Calc: {dados['probabilidade']}%
         
-        prompt = (
-            f"Atue como Trader Institucional. Par: {simbolo}.\n"
-            f"DADOS: Preço ${dados_tecnicos['preco']} | RSI: {dados_tecnicos['rsi']:.1f} | "
-            f"Probabilidade Alta: {dados_tecnicos['probabilidade']}%\n"
-            f"Responda CURTO:\n"
-            f"VEREDITO: [COMPRA/VENDA/NEUTRO]\n"
-            f"ANÁLISE: [Motivo técnico em 1 frase]"
-        )
-
+        Responda em Português (PT-BR). SEJA BREVE (Máx 3 linhas).
+        Dê o VEREDITO: [COMPRA / VENDA / NEUTRO] e o motivo técnico.
+        """
         # --- TRECHO PARA SUBSTITUIR O LOOP FOR ---
         
         # Loop de Tentativa e Erro (Rotação de Modelos)
-        # --- LOOP DE TENTATIVAS COM DIAGNÓSTICO ---
+       # --- LOOP DE ROTAÇÃO DE MODELOS (A MÁGICA ACONTECE AQUI) ---
         for modelo_atual in self.modelos:
             try:
-                # Tenta conectar
+                # Cria o cliente usando a chave
+                client = genai.Client(api_key=self.api_key)
+                
+                # Tenta gerar a resposta com o modelo da vez
                 response = client.models.generate_content(
                     model=modelo_atual,
                     contents=prompt
                 )
+                
+                # Se der certo, RETORNA e sai da função.
                 return response.text, modelo_atual
 
             except Exception as e:
-                # IMPRIME O ERRO REAL NO TERMINAL
-                print(f"❌ Falha no {modelo_atual}: {e}")
-                continue # Pula para o próximo
+                # Se der erro (Cota ou Modelo inexistente), apenas imprime e TENTA O PRÓXIMO
+                print(f"⚠️ {modelo_atual} falhou: {e}. Tentando o próximo...")
+                continue 
         
-        # Se chegou aqui, todos falharam
-        return "⚠️ Sistema sobrecarregado (Todos falharam).", "Falha Geral"
+        # Se o loop terminar e nada funcionar:
+        return "⚠️ Todos os modelos falharam (Cota Excedida).", "Falha Geral"
 
 
