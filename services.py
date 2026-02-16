@@ -131,22 +131,22 @@ class AIService:
         # --- TRECHO PARA SUBSTITUIR O LOOP FOR ---
         
         # Loop de Tentativa e Erro (Rotação de Modelos)
-        for modelo_atual in modelos:
+        # --- LOOP DE TENTATIVAS COM DIAGNÓSTICO ---
+        for modelo_atual in self.modelos:
             try:
-                # Tenta conectar com o modelo da vez
+                # Tenta conectar
                 response = client.models.generate_content(
                     model=modelo_atual,
                     contents=prompt
                 )
-                
-                # Se funcionar, retorna imediatamente e encerra o loop
                 return response.text, modelo_atual
 
             except Exception as e:
-                # Se der erro (Cota Excedida), avisa no terminal e PULA para o próximo
-                print(f"⚠️ {modelo_atual} falhou (Cota/Erro). Tentando o próximo...")
-                continue # <--- Esse comando força a ida para o próximo modelo da lista
+                # IMPRIME O ERRO REAL NO TERMINAL
+                print(f"❌ Falha no {modelo_atual}: {e}")
+                continue # Pula para o próximo
         
-        # Se chegar aqui, é porque TODOS falharam
-        return "⚠️ Sistema sobrecarregado. Aguarde 1 min.", "Falha Geral"
+        # Se chegou aqui, todos falharam
+        return "⚠️ Sistema sobrecarregado (Todos falharam).", "Falha Geral"
+
 
