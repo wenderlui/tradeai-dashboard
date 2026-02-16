@@ -4,6 +4,7 @@ import os
 from google import genai
 from dotenv import load_dotenv, find_dotenv # Adicionei find_dotenv
 import streamlit as st
+import time
 
 # Carrega as variáveis de ambiente forçando a busca do arquivo
 load_dotenv(find_dotenv()) 
@@ -97,7 +98,7 @@ class MarketDataService:
 # --- SERVIÇO DE IA (COM ROTAÇÃO AUTOMÁTICA CORRIGIDA) ---
 class AIService:
     def __init__(self):
-        # 1. DEFINIÇÃO DA LISTA DE MODELOS (Aqui é o lugar certo)
+        # MUDANÇA: O '1.5-flash' vem primeiro porque tem MUITO mais cota que o 2.0
         self.modelos = [
             "gemini-2.0-flash",       # O novo padrão (Rápido e Inteligente)
             "gemini-2.0-flash-lite",  # Ultra rápido (Ótimo para não travar)
@@ -105,9 +106,9 @@ class AIService:
             "gemini-2.5-pro"          # Mais inteligente (Backup de luxo)
         ]
         
-        # Tenta pegar chave dos Secrets (Cloud) ou Env (Local)
         self.api_key = None
         try:
+            # Tenta pegar a chave de qualquer lugar possível
             if "GEMINI_API_KEY" in st.secrets: 
                 self.api_key = st.secrets["GEMINI_API_KEY"]
             else: 
@@ -116,49 +117,43 @@ class AIService:
             self.api_key = os.getenv("GEMINI_API_KEY")
 
     def consultar_gemini(self, simbolo, dados):
-        # Verificação de segurança
         if not self.api_key:
             return "⚠️ Configure a GEMINI_API_KEY.", "Erro Config"
 
+        # Validação básica
         if not dados or dados.get('preco', 0) == 0:
-             return "⚠️ Aguardando dados do mercado...", "Sem Dados"
+             return "⚠️ Aguardando dados...", "Sem Dados"
 
-        # O Prompt para o Trader IA
         prompt = f"""
-        Aja como Trader Profissional. Analise o par {simbolo}.
-        Preço Atual: ${dados['preco']}
-        RSI (14): {dados['rsi']:.1f}
-        Média EMA 21: {dados['ema21']:.2f}
-        Probabilidade Calc: {dados['probabilidade']}%
+        Aja como Trader Crypto. Analise {simbolo}.
+        Preço: {dados['preco']} | RSI: {dados['rsi']:.1f} | EMA21: {dados['ema21']:.2f}
+        Probabilidade Alta: {dados['probabilidade']}%
         
-        Responda em Português (PT-BR). SEJA BREVE (Máx 3 linhas).
-        Dê o VEREDITO: [COMPRA / VENDA / NEUTRO] e o motivo técnico.
+        Seja breve (max 3 linhas).
+        VEREDITO: [COMPRA/VENDA/NEUTRO] e motivo.
         """
-        # --- TRECHO PARA SUBSTITUIR O LOOP FOR ---
-        
-        # Loop de Tentativa e Erro (Rotação de Modelos)
-       # --- LOOP DE ROTAÇÃO DE MODELOS (A MÁGICA ACONTECE AQUI) ---
-        for modelo_atual in self.modelos:
+
+        # --- LOOP COM RESPIRO ---
+        for i, modelo_atual in enumerate(self.modelos):
             try:
-                # Cria o cliente usando a chave
+                # Cria o cliente
                 client = genai.Client(api_key=self.api_key)
                 
-                # Tenta gerar a resposta com o modelo da vez
+                # Tenta gerar
                 response = client.models.generate_content(
                     model=modelo_atual,
                     contents=prompt
                 )
-                
-                # Se der certo, RETORNA e sai da função.
                 return response.text, modelo_atual
 
             except Exception as e:
-                # Se der erro (Cota ou Modelo inexistente), apenas imprime e TENTA O PRÓXIMO
-                print(f"⚠️ {modelo_atual} falhou: {e}. Tentando o próximo...")
+                # SE FALHAR: Espera um pouco antes de tentar o próximo!
+                tempo_espera = 2 * (i + 1) # Espera 2s, depois 4s, depois 6s...
+                print(f"⚠️ {modelo_atual} falhou. Esperando {tempo_espera}s...")
+                time.sleep(tempo_espera) # <--- AQUI ESTÁ O SEGREDO
                 continue 
         
-        # Se o loop terminar e nada funcionar:
-        return "⚠️ Todos os modelos falharam (Cota Excedida).", "Falha Geral"
+        return "⚠️ Cota excedida em todos. Tente em 2 min.", "Falha Total"
 
 
 
