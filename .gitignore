@@ -1,0 +1,14 @@
+# Arquivos de Senha (NUNCA SUBIR ISSO)
+.env
+.streamlit/secrets.toml
+secrets.toml
+
+# Arquivos de Sistema e Cache
+__pycache__/
+*.pyc
+.DS_Store
+
+# Ambientes Virtuais (Se tiver criado)
+venv/
+env/
+.venv/
