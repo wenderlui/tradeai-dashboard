@@ -2,9 +2,10 @@ import streamlit as st
 import time
 import pandas as pd
 from services import MarketDataService, AIService
-from gtts import gTTS
 import io
 import base64
+import asyncio
+import edge_tts 
 
 # --- 1. CONFIGURAÇÃO DA PÁGINA ---
 st.set_page_config(page_title="TradeAI Dashboard", page_icon="📈", layout="wide")
@@ -12,87 +13,47 @@ st.set_page_config(page_title="TradeAI Dashboard", page_icon="📈", layout="wid
 # --- 2. CSS PERSONALIZADO ---
 st.markdown("""
 <style>
-    /* Fundo Geral */
     .stApp { background-color: #0b0e11; color: #ffffff; }
-    
-    .block-container { 
-        padding-top: 4rem; 
-        padding-bottom: 5rem; 
-        max-width: 1400px; 
-    }
-    
-    /* ALINHAMENTO DO BOTÃO INICIAR */
-    .btn-align {
-        margin-top: 28px; 
-    }
-    
-    /* BOTÃO VERDE NEON */
+    .block-container { padding-top: 4rem; padding-bottom: 5rem; max-width: 1400px; }
+    .btn-align { margin-top: 28px; }
     .btn-green button {
-        background-color: #00c853 !important;
-        color: white !important;
-        border: 1px solid #00e676 !important;
-        font-weight: bold !important;
-        height: 42px !important;
+        background-color: #00c853 !important; color: white !important;
+        border: 1px solid #00e676 !important; font-weight: bold !important; height: 42px !important;
     }
-    .btn-green button:hover {
-        background-color: #00e676 !important;
-        box-shadow: 0 0 15px rgba(0, 200, 83, 0.5) !important;
-    }
-    
-    /* Cards */
-    .metric-card {
-        background-color: #15191e; border: 1px solid #2b303b; border-radius: 12px; padding: 15px;
-    }
+    .btn-green button:hover { background-color: #00e676 !important; box-shadow: 0 0 15px rgba(0, 200, 83, 0.5) !important; }
+    .metric-card { background-color: #15191e; border: 1px solid #2b303b; border-radius: 12px; padding: 15px; }
     .metric-value { font-size: 22px; font-weight: bold; color: #ffffff; }
     .metric-label { font-size: 11px; color: #8b949e; text-transform: uppercase; }
     .metric-sub { font-size: 11px; font-weight: 500; }
     .green-text { color: #00c853; } .red-text { color: #ff5252; }
-    .icon-box {
-        float: right; width: 35px; height: 35px; background-color: #1e2329; border-radius: 8px;
-        display: flex; align-items: center; justify-content: center; font-size: 18px;
-    }
-
-    /* Cards IA */
-    .ai-card {
-        background-color: #1e2329; border: 1px solid #444; border-radius: 12px; padding: 20px;
-        height: 280px; overflow-y: auto; display: flex; flex-direction: column;
-    }
-    .ai-title { 
-        color: #00c853; font-weight: bold; margin-bottom: 10px; font-size: 14px;
-        border-bottom: 1px solid #333; padding-bottom: 8px;
-    }
+    .icon-box { float: right; width: 35px; height: 35px; background-color: #1e2329; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 18px; }
+    .ai-card { background-color: #1e2329; border: 1px solid #444; border-radius: 12px; padding: 20px; height: 280px; overflow-y: auto; display: flex; flex-direction: column; }
+    .ai-title { color: #00c853; font-weight: bold; margin-bottom: 10px; font-size: 14px; border-bottom: 1px solid #333; padding-bottom: 8px; }
     .ai-text { font-size: 14px; color: #d1d5db; line-height: 1.6; }
-
-    /* Inputs Escuros */
     div[data-baseweb="select"] > div { background-color: #15191e; border-color: #2b303b; color: white; }
     div[data-testid="stTextInput"] > div > div { background-color: #15191e; border-color: #2b303b; color: white; }
 </style>
 """, unsafe_allow_html=True)
 
-# --- FUNÇÃO NOVA DE VOZ HUMANA (NEURAL) ---
-async def gerar_audio_humano(texto, voz="pt-BR-FranciscaNeural"):
-    """Gera áudio ultra-realista usando Microsoft Edge TTS"""
+# --- FUNÇÃO NOVA: ÁUDIO NA MEMÓRIA (SEM ARQUIVOS) ---
+async def gerar_audio_bytes_memoria(texto, voz="pt-BR-FranciscaNeural"):
+    """Gera o áudio direto em bytes, sem salvar arquivo (Funciona na Nuvem)"""
     communicate = edge_tts.Communicate(texto, voz)
-    # Salva num arquivo temporário para garantir compatibilidade
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as fp:
-        await communicate.save(fp.name)
-        fp.seek(0)
-        return fp.name # Retorna o caminho do arquivo
+    mp3_fp = io.BytesIO()
+    async for chunk in communicate.stream():
+        if chunk["type"] == "audio":
+            mp3_fp.write(chunk["data"])
+    return mp3_fp.getvalue()
 
-def autoplay_audio(file_path):
-    """Lê o arquivo e toca automaticamente"""
-    with open(file_path, "rb") as f:
-        data = f.read()
-    b64 = base64.b64encode(data).decode()
+def autoplay_audio_bytes(audio_bytes):
+    """Toca os bytes de áudio diretamente"""
+    b64 = base64.b64encode(audio_bytes).decode()
     md = f"""
         <audio autoplay style="display:none;">
         <source src="data:audio/mp3;base64,{b64}" type="audio/mp3">
         </audio>
     """
     st.markdown(md, unsafe_allow_html=True)
-    try:
-        os.remove(file_path) # Limpa o arquivo temporário
-    except: pass
 
 # --- 3. INICIALIZAÇÃO ---
 market_service = MarketDataService()
@@ -133,7 +94,7 @@ with c_tempo:
 
 with c_voz:
     st.markdown('<div class="btn-align">', unsafe_allow_html=True)
-    voz_ativa = st.toggle("🔊", value=True, help="Ler análise em voz alta")
+    voz_tipo = st.toggle("🔊", value=True, help="Voz Ativa (Francisca Neural)")
     st.markdown('</div>', unsafe_allow_html=True)
 
 with c_btn:
@@ -171,11 +132,10 @@ with col1:
     st.markdown(card_html(f"Preço ({simbolo_tecnico[:3]})", f"{dados['preco']:,.2f}", f"RSI: {dados['rsi']:.1f}", "💲"), unsafe_allow_html=True)
 
 with col2:
-    # --- CORREÇÃO DO ERRO DE DIVISÃO POR ZERO AQUI ---
     if dados['ema21'] > 0:
         var_simulada = (dados['preco'] - dados['ema21']) / dados['ema21'] * 100
     else:
-        var_simulada = 0.0 # Se for zero, a variação é zero
+        var_simulada = 0.0
     
     cor_var = "green-text" if var_simulada > 0 else "red-text"
     icone_var = "📈" if var_simulada > 0 else "📉"
@@ -207,7 +167,7 @@ st.write("")
 
 # --- 7. PROCESSAMENTO DA IA ---
 col_ia_atual, col_ia_history = st.columns(2)
-audio_para_tocar = None
+audio_bytes_final = None # Variável para guardar os bytes
 
 if st.session_state.analise_ativa:
     with st.spinner("🤖 Analisando padrões de mercado..."):
@@ -217,13 +177,13 @@ if st.session_state.analise_ativa:
         analise_texto, modelo = ai_service.consultar_gemini(simbolo_tecnico, dados)
         st.session_state.ai_text_current = analise_texto
         
-        if voz_ativa:
+        # Geração de Voz Neural (Direto na Memória)
+        if voz_tipo:
             try:
-                tts = gTTS(text=analise_texto.replace("*", ""), lang='pt')
-                mp3_fp = io.BytesIO()
-                tts.write_to_fp(mp3_fp)
-                audio_para_tocar = mp3_fp.getvalue()
-            except: pass
+                audio_bytes_final = asyncio.run(gerar_audio_bytes_memoria(analise_texto.replace("*", "")))
+            except Exception as e:
+                st.error(f"Erro no áudio: {e}")
+                
     st.session_state.analise_ativa = False
 
 with col_ia_atual:
@@ -233,8 +193,10 @@ with col_ia_atual:
         <div class="ai-text">{st.session_state.ai_text_current}</div>
     </div>
     """, unsafe_allow_html=True)
-    if audio_para_tocar:
-        autoplay_audio(audio_para_tocar)
+    
+    # Auto-play usando bytes, não arquivo
+    if audio_bytes_final:
+        autoplay_audio_bytes(audio_bytes_final)
 
 with col_ia_history:
     st.markdown(f"""
