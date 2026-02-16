@@ -102,11 +102,11 @@ class MarketDataService:
 # --- SERVIÇO DE IA (Mantido com Rotação) ---
 class AIService:
     def __init__(self):
-        self.modelos = [
-            "gemini-2.0-flash",       
-            "gemini-2.0-flash-lite",  
-            "gemini-1.5-flash",       
-            "gemini-1.5-pro"          
+        selfmodelos = [
+            "gemini-2.0-flash",       # O novo padrão (Rápido e Inteligente)
+            "gemini-2.0-flash-lite",  # Ultra rápido (Ótimo para não travar)
+            "gemini-2.5-flash",       # Geração mais nova
+            "gemini-2.5-pro"          # Mais inteligente (Backup de luxo)
         ]
         self.api_key = os.getenv("GEMINI_API_KEY")
 
@@ -141,3 +141,4 @@ class AIService:
                 continue
         
         return "⚠️ IA Sobrecarregada. Tente em 30s.", "Falha"
+
