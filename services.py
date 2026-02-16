@@ -3,106 +3,107 @@ import pandas as pd
 import os
 from google import genai
 from dotenv import load_dotenv, find_dotenv
-import streamlit as st
 
-# Carrega variáveis
+# Carrega as senhas
 load_dotenv(find_dotenv())
 
-# --- SERVIÇO DE DADOS DE MERCADO (CORRIGIDO) ---
+# --- SERVIÇO DE DADOS (AGORA COM BINANCE) ---
 class MarketDataService:
     def __init__(self):
-        # Trocamos para Binance temporariamente se Bybit falhar, ou mantemos Bybit
-        # Vamos usar Bybit pois não exige API Key para dados públicos
-        self.exchange = ccxt.bybit() 
+        # MUDANÇA: Usando Binance (Mais estável para dados públicos)
+        self.exchange = ccxt.binance() 
 
     def _resolver_simbolo(self, simbolo_entrada):
         """
-        Transforma qualquer bagunça que o usuário digitar em um par válido.
-        Ex: "pepe" -> "PEPE/USDT"
-        Ex: "BTCUSDT" -> "BTC/USDT"
+        Transforma o texto do usuário no formato da Binance
         """
-        # 1. Remove espaços e joga pra maiúsculo
-        s = simbolo_entrada.upper().strip()
+        # Limpa espaços e joga para maiúsculo
+        s = str(simbolo_entrada).upper().strip().replace(" ", "")
         
-        # 2. Mapa Manual (Para garantir os principais)
+        # Mapa de apelidos comuns
         mapa = {
-            "BTCUSDT": "BTC/USDT",
-            "ETHUSDT": "ETH/USDT",
-            "SOLUSDT": "SOL/USDT",
-            "LTCUSDT": "LTC/USDT",
-            "POLUSDT": "POL/USDT", # Polygon
-            "MATICUSDT": "MATIC/USDT", # Caso antigo
+            "POL": "POL/USDT",
+            "MATIC": "POL/USDT", # Binance já converteu MATIC para POL
+            "BTC": "BTC/USDT",
+            "ETH": "ETH/USDT",
+            "DOGE": "DOGE/USDT",
+            "PEPE": "PEPE/USDT",
+            "SOL": "SOL/USDT"
         }
         
         if s in mapa:
             return mapa[s]
+
+        # Lógica inteligente de formatação
+        # Se tem barra, retorna (Ex: BTC/USDT)
+        if "/" in s:
+            return s
             
-        # 3. Tratamento Genérico (Para "Outro...")
-        # Se o usuário digitou "PEPEUSDT" ou "PEPE", queremos "PEPE/USDT"
-        
-        # Remove a barra se tiver
-        s = s.replace("/", "")
-        
-        # Se terminar com USDT, remove para formatar certo depois
+        # Se termina com USDT mas não tem barra (Ex: BTCUSDT -> BTC/USDT)
         if s.endswith("USDT"):
-            moeda_base = s.replace("USDT", "")
-        else:
-            moeda_base = s
+            return s.replace("USDT", "/USDT")
             
-        return f"{moeda_base}/USDT"
+        # Se não tem nada, adiciona USDT (Ex: ADA -> ADA/USDT)
+        return f"{s}/USDT"
 
     def obter_dados_tecnicos(self, simbolo):
         symbol_fmt = self._resolver_simbolo(simbolo)
+        print(f"🔍 Buscando na Binance: {symbol_fmt}...") # Debug no terminal
         
         try:
-            # Tenta buscar os dados
+            # Busca os últimos 100 candles de 15 minutos
             ohlcv = self.exchange.fetch_ohlcv(symbol_fmt, timeframe='15m', limit=100)
             
-            # Se a lista vier vazia
-            if not ohlcv:
-                print(f"❌ Bybit retornou vazio para: {symbol_fmt}")
+            if not ohlcv or len(ohlcv) < 20:
+                print(f"❌ Binance não retornou dados suficientes para {symbol_fmt}")
                 return None
                 
             df = pd.DataFrame(ohlcv, columns=['time', 'open', 'high', 'low', 'close', 'volume'])
             
-            # Cálculos (RSI, EMA)
+            # --- CÁLCULOS ---
             df['delta'] = df['close'].diff()
             df['gain'] = df['delta'].where(df['delta'] > 0, 0)
             df['loss'] = -df['delta'].where(df['delta'] < 0, 0)
+            
+            # RSI (Protegido contra divisão por zero)
             avg_gain = df['gain'].rolling(window=14).mean()
             avg_loss = df['loss'].rolling(window=14).mean()
             rs = avg_gain / avg_loss
             df['rsi'] = 100 - (100 / (1 + rs))
+            df['rsi'] = df['rsi'].fillna(50) # Se der erro, assume neutro
             
+            # Médias Móveis
             df['ema9'] = df['close'].ewm(span=9).mean()
             df['ema21'] = df['close'].ewm(span=21).mean()
             
             ultimo = df.iloc[-1]
             
-            # Lógica simples de probabilidade
+            # Cálculo de Probabilidade (Simplificado)
             prob = 50
             if ultimo['rsi'] < 30: prob += 20
             elif ultimo['rsi'] > 70: prob -= 20
-            if ultimo['close'] > ultimo['ema21']: prob += 10
+            if ultimo['close'] > ultimo['ema21']: prob += 15
+            if ultimo['ema9'] > ultimo['ema21']: prob += 10
             
-            # Print de Sucesso no Terminal (Para você ver que funcionou)
-            print(f"✅ Dados recebidos para {symbol_fmt}: Preço ${ultimo['close']}")
+            print(f"✅ Dados recebidos! Preço: {ultimo['close']}")
             
             return {
-                "preco": ultimo['close'],
-                "rsi": ultimo['rsi'],
-                "ema9": ultimo['ema9'],
-                "ema21": ultimo['ema21'],
-                "probabilidade": min(max(prob, 0), 100)
+                "preco": float(ultimo['close']),
+                "rsi": float(ultimo['rsi']),
+                "ema9": float(ultimo['ema9']),
+                "ema21": float(ultimo['ema21']),
+                "probabilidade": min(max(int(prob), 0), 100)
             }
+            
         except Exception as e:
-            print(f"❌ Erro crítico ao buscar {symbol_fmt}: {e}")
+            print(f"❌ Erro crítico na API: {e}")
             return None
 
-# --- SERVIÇO DE IA (Mantido com Rotação) ---
+# --- SERVIÇO DE IA (SEM MUDANÇAS) ---
 class AIService:
     def __init__(self):
-        selfmodelos = [
+        # Lista de modelos para rotação de falha
+        self.modelos = [
             "gemini-2.0-flash",       # O novo padrão (Rápido e Inteligente)
             "gemini-2.0-flash-lite",  # Ultra rápido (Ótimo para não travar)
             "gemini-2.5-flash",       # Geração mais nova
@@ -111,34 +112,34 @@ class AIService:
         self.api_key = os.getenv("GEMINI_API_KEY")
 
     def consultar_gemini(self, simbolo, dados):
-        # Validação de dados zerados ANTES de chamar a IA
-        if dados['preco'] == 0:
-            return "⚠️ ERRO DE DADOS: Não consegui ler o preço da moeda. Verifique o símbolo.", "Sistema"
+        # Validação extra antes de gastar cota da IA
+        if not dados or dados.get('preco', 0) == 0:
+            return "⚠️ DADOS INVÁLIDOS: O robô não conseguiu ler o mercado. Verifique o símbolo.", "Sistema"
 
         if not self.api_key:
             return "⚠️ Configure a GEMINI_API_KEY.", "Erro"
 
         prompt = f"""
-        Aja como Trader Crypto Profissional. Analise {simbolo}:
-        Preço: {dados['preco']}
-        RSI(14): {dados['rsi']:.1f}
-        Média EMA21: {dados['ema21']:.2f}
+        Aja como um Trader Profissional. Analise o par {simbolo}.
+        Preço Atual: ${dados['preco']}
+        RSI (14 períodos): {dados['rsi']:.1f}
+        Média EMA 21: {dados['ema21']:.2f}
         
-        Responda em PT-BR (máximo 3 linhas).
-        Dê o Veredito (COMPRA/VENDA/NEUTRO) e o motivo técnico curto.
+        Responda em Português do Brasil (PT-BR).
+        Seja direto (máximo 3 linhas).
+        Dê um veredito claro: COMPRA, VENDA ou NEUTRO e explique o motivo técnico.
         """
 
-        for modelo_atual in self.modelos:
+        for modelo in self.modelos:
             try:
                 client = genai.Client(api_key=self.api_key)
                 response = client.models.generate_content(
-                    model=modelo_atual,
+                    model=modelo,
                     contents=prompt
                 )
-                return response.text, modelo_atual
+                return response.text, modelo
             except Exception as e:
-                print(f"⚠️ {modelo_atual} falhou. Tentando próximo...")
+                print(f"⚠️ {modelo} falhou. Tentando próximo...")
                 continue
         
-        return "⚠️ IA Sobrecarregada. Tente em 30s.", "Falha"
-
+        return "⚠️ IA indisponível. Tente novamente em 1 min.", "Erro"
