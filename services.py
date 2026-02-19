@@ -1,79 +1,63 @@
 import ccxt
 import pandas as pd
 import os
+import time
+import streamlit as st
 from google import genai
 from dotenv import load_dotenv, find_dotenv
-import time
-import streamlit as st # Adicionado para mostrar erros na tela
 
 load_dotenv(find_dotenv())
 
-# --- SERVIÇO DE DADOS (MULTI-EXCHANGE) ---
+# --- SERVIÇO DE DADOS (MULTI-EXCHANGE ROBUSTO) ---
 class MarketDataService:
     def __init__(self):
-        # Lista de tentativas: Se a Binance falhar (IP Block), tenta Gate.io, depois Huobi
+        # Lista de tentativas ordenada por estabilidade
         self.exchanges = [
-            ccxt.gateio({'enableRateLimit': True}), # Gate costuma liberar IPs de Cloud
+            ccxt.gateio({'enableRateLimit': True}),  # Gate.io costuma ser amigável com Cloud
             ccxt.kucoin({'enableRateLimit': True}),
-            ccxt.binance({'enableRateLimit': True}), 
+            ccxt.binance({'enableRateLimit': True}),
         ]
 
     def _resolver_simbolo_e_timeframe(self, exchange, simbolo_entrada, timeframe):
-        # 1. Ajuste do Símbolo
         s = str(simbolo_entrada).upper().strip().replace(" ", "")
         
-        # Mapa de correção POL/MATIC
+        # Mapa de pares
         pair = f"{s}/USDT"
         if "/" not in s:
             if s.endswith("USDT"): pair = s.replace("USDT", "/USDT")
             else: pair = f"{s}/USDT"
             
-        # 2. Ajuste do Timeframe (Algumas exchanges usam '15' em vez de '15m')
-        tf = timeframe
-        if exchange.id == 'kucoin' and tf.endswith('m'):
-            # Kucoin aceita '15m', mas vamos garantir
-            pass 
-            
-        return pair, tf
+        return pair, timeframe
 
     def obter_dados_tecnicos(self, simbolo_entrada, timeframe='15m'):
-        erro_final = ""
-        
-        # Tenta em cada exchange da lista até conseguir
+        # 1. Tenta buscar em várias exchanges
         for exchange in self.exchanges:
             try:
                 symbol_fmt, tf_fmt = self._resolver_simbolo_e_timeframe(exchange, simbolo_entrada, timeframe)
                 
-                # Tenta buscar POL. Se falhar, tenta MATIC (pois muitas ainda não mudaram o nome)
-                tickers_tentativa = [symbol_fmt]
-                if "POL/" in symbol_fmt:
-                    tickers_tentativa.append(symbol_fmt.replace("POL/", "MATIC/"))
-                
-                ohlcv = None
-                pair_usado = ""
-                
-                for ticker in tickers_tentativa:
-                    try:
-                        ohlcv = exchange.fetch_ohlcv(ticker, timeframe=tf_fmt, limit=50)
-                        if ohlcv:
-                            pair_usado = ticker
-                            break
-                    except:
-                        continue
+                # Tenta POL e depois MATIC se falhar
+                tickers = [symbol_fmt]
+                if "POL/" in symbol_fmt: tickers.append(symbol_fmt.replace("POL/", "MATIC/"))
 
-                if not ohlcv:
-                    continue # Tenta a próxima exchange
-                
-                # Se chegou aqui, deu certo! Processa os dados.
+                ohlcv = None
+                for ticker in tickers:
+                    try:
+                        ohlcv = exchange.fetch_ohlcv(ticker, timeframe=tf_fmt, limit=60)
+                        if ohlcv: break
+                    except: continue
+
+                if not ohlcv: continue # Próxima exchange
+
+                # 2. Processa os dados (Pandas)
                 df = pd.DataFrame(ohlcv, columns=['time', 'open', 'high', 'low', 'close', 'volume'])
                 
-                # Cálculos Técnicos
+                # Cálculos
                 df['delta'] = df['close'].diff()
                 df['gain'] = df['delta'].where(df['delta'] > 0, 0)
                 df['loss'] = -df['delta'].where(df['delta'] < 0, 0)
                 
-                avg_gain = df['gain'].rolling(window=14).mean()
-                avg_loss = df['loss'].rolling(window=14).mean()
+                avg_gain = df['gain'].rolling(14).mean()
+                avg_loss = df['loss'].rolling(14).mean()
                 rs = avg_gain / avg_loss
                 df['rsi'] = 100 - (100 / (1 + rs))
                 df['rsi'] = df['rsi'].fillna(50)
@@ -83,15 +67,10 @@ class MarketDataService:
                 
                 ultimo = df.iloc[-1]
                 
-                # Lógica Simples de Probabilidade
+                # Probabilidade Simples
                 prob = 50
-                if ultimo['rsi'] < 30: prob += 25
-                elif ultimo['rsi'] > 70: prob -= 25
-                if ultimo['close'] > ultimo['ema21']: prob += 15
-                else: prob -= 15
-                
-                # Aviso visual de qual fonte funcionou
-                # st.toast(f"Dados obtidos via {exchange.name} ({pair_usado})") 
+                if ultimo['rsi'] < 30: prob += 20
+                if ultimo['close'] > ultimo['ema21']: prob += 20
                 
                 return {
                     "preco": float(ultimo['close']),
@@ -103,57 +82,53 @@ class MarketDataService:
                 }
 
             except Exception as e:
-                erro_final = str(e)
-                continue # Tenta a próxima exchange
+                print(f"Erro na exchange {exchange.id}: {e}")
+                continue
 
-        # Se saiu do loop e nada funcionou:
-        st.error(f"❌ Erro ao buscar dados: {erro_final}. Tente outro par ou tempo.")
-        return None
+        # 3. FALHA TOTAL (Retorna zerado para não quebrar o site)
+        return {
+            "preco": 0.0,
+            "rsi": 50.0,
+            "ema9": 0.0,
+            "ema21": 0.0,
+            "probabilidade": 50,
+            "erro": "Não foi possível obter dados."
+        }
 
-# --- SERVIÇO DE IA ---
+# --- SERVIÇO DE IA (INTEGRADO) ---
 class AIService:
     def __init__(self):
-        self.modelos = [
-            "gemini-1.5-flash", 
-            "gemini-2.0-flash", 
-            "gemini-1.5-pro"
-        ]
-        self.api_key = None
+        self.modelos = ["gemini-1.5-flash", "gemini-2.0-flash", "gemini-1.5-pro"]
         try:
-            if "GEMINI_API_KEY" in st.secrets: 
-                self.api_key = st.secrets["GEMINI_API_KEY"]
-            else: 
-                self.api_key = os.getenv("GEMINI_API_KEY")
-        except: 
-            self.api_key = os.getenv("GEMINI_API_KEY")
+            self.api_key = st.secrets.get("GEMINI_API_KEY") or os.getenv("GEMINI_API_KEY")
+        except: self.api_key = None
 
     def consultar_gemini(self, simbolo, dados):
-        if not self.api_key: return "⚠️ Configure a GEMINI_API_KEY.", "Erro Config"
-        if not dados or dados.get('preco', 0) == 0: return "⚠️ Sem dados de mercado.", "Erro Dados"
+        if not self.api_key: return "⚠️ Configure a API Key.", "Erro"
+        
+        # Se os dados estiverem zerados, avisa
+        if dados['preco'] == 0:
+            return "⚠️ Não consegui ler o mercado. Verifique o par ou tente mais tarde.", "Sem Dados"
 
         tf = dados.get('timeframe', '15m')
         
         prompt = f"""
-        Aja como Trader Crypto Profissional. 
-        Analise {simbolo} no tempo gráfico {tf}.
+        Aja como Trader Profissional. Analise {simbolo} ({tf}).
+        Preço: {dados['preco']}
+        RSI: {dados['rsi']:.1f} (Sobrecompra > 70, Sobrevenda < 30)
+        EMA 21: {dados['ema21']:.2f}
         
-        DADOS TÉCNICOS:
-        - Preço: ${dados['preco']}
-        - RSI (14): {dados['rsi']:.1f}
-        - Média EMA 21: {dados['ema21']:.2f}
-        - Tendência: {"ALTA" if dados['preco'] > dados['ema21'] else "BAIXA"}
-        
-        Responda em PT-BR (Máx 3 linhas).
-        Dê um VEREDITO CLARO: [COMPRA / VENDA / NEUTRO] e explique usando o RSI e a Média.
+        Responda em Português. Seja direto.
+        Dê o VEREDITO: [COMPRA / VENDA / NEUTRO] e explique o porquê com base nos indicadores.
         """
 
-        for i, modelo in enumerate(self.modelos):
+        for modelo in self.modelos:
             try:
                 client = genai.Client(api_key=self.api_key)
                 response = client.models.generate_content(model=modelo, contents=prompt)
                 return response.text, modelo
-            except Exception as e:
-                time.sleep(1 + i)
-                continue 
+            except:
+                time.sleep(1)
+                continue
         
-        return "⚠️ Erro na IA (Cota ou Conexão).", "Falha"
+        return "⚠️ IA indisponível no momento.", "Erro IA"
