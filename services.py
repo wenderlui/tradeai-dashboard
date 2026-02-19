@@ -95,46 +95,66 @@ class MarketDataService:
             "erro": "Não foi possível obter dados."
         }
 
-# --- SERVIÇO DE IA (INTEGRADO) ---
+# --- SERVIÇO DE IA (COM DEBUG DETALHADO) ---
 class AIService:
     def __init__(self):
+        # Tenta modelos na ordem de prioridade (Flash é mais rápido/barato)
         self.modelos = [
             "gemini-2.0-flash",       # O novo padrão (Rápido e Inteligente)
             "gemini-2.0-flash-lite",  # Ultra rápido (Ótimo para não travar)
             "gemini-2.5-flash",       # Geração mais nova
             "gemini-2.5-pro"          # Mais inteligente (Backup de luxo)
         ]
+        
+        # Tenta pegar a chave de todos os lugares possíveis
+        self.api_key = None
         try:
-            self.api_key = st.secrets.get("GEMINI_API_KEY") or os.getenv("GEMINI_API_KEY")
-        except: self.api_key = None
+            if "GEMINI_API_KEY" in st.secrets:
+                self.api_key = st.secrets["GEMINI_API_KEY"]
+            elif "GEMINI_API_KEY" in os.environ:
+                self.api_key = os.environ["GEMINI_API_KEY"]
+            else:
+                self.api_key = os.getenv("GEMINI_API_KEY")
+        except:
+            self.api_key = os.getenv("GEMINI_API_KEY")
 
     def consultar_gemini(self, simbolo, dados):
-        if not self.api_key: return "⚠️ Configure a API Key.", "Erro"
+        # 1. Validação de Chave
+        if not self.api_key: 
+            return "❌ ERRO: Chave API não encontrada. Verifique os Secrets.", "Sem Chave"
         
-        # Se os dados estiverem zerados, avisa
-        if dados['preco'] == 0:
-            return "⚠️ Não consegui ler o mercado. Verifique o par ou tente mais tarde.", "Sem Dados"
+        # 2. Validação de Dados
+        if not dados or dados.get('preco', 0) == 0:
+            return "⚠️ Mercado ilegível (Preço zerado).", "Sem Dados"
 
         tf = dados.get('timeframe', '15m')
         
         prompt = f"""
-        Aja como Trader Profissional. Analise {simbolo} ({tf}).
-        Preço: {dados['preco']}
-        RSI: {dados['rsi']:.1f} (Sobrecompra > 70, Sobrevenda < 30)
-        EMA 21: {dados['ema21']:.2f}
+        Aja como Trader Crypto. Analise {simbolo} ({tf}).
+        Preço: {dados['preco']} | RSI: {dados['rsi']:.1f} | EMA21: {dados['ema21']:.2f}
         
-        Responda em Português. Seja direto.
-        Dê o VEREDITO: [COMPRA / VENDA / NEUTRO] e explique o porquê com base nos indicadores.
+        Seja direto (PT-BR). Dê o VEREDITO [COMPRA/VENDA/NEUTRO] e explique.
         """
 
+        ultimo_erro = ""
+
+        # 3. Loop de Tentativas
         for modelo in self.modelos:
             try:
+                # IMPORTANTE: Usa o client da nova biblioteca
                 client = genai.Client(api_key=self.api_key)
-                response = client.models.generate_content(model=modelo, contents=prompt)
+                
+                response = client.models.generate_content(
+                    model=modelo, 
+                    contents=prompt
+                )
                 return response.text, modelo
-            except:
-                time.sleep(1)
+
+            except Exception as e:
+                ultimo_erro = str(e)
+                print(f"Falha no modelo {modelo}: {e}")
+                time.sleep(1) # Espera 1s antes de tentar o próximo
                 continue
         
-        return "⚠️ IA indisponível no momento.", "Erro IA"
-
+        # SE TUDO FALHAR, MOSTRA O ERRO REAL NA TELA:
+        return f"❌ Erro Técnico: {ultimo_erro}", "Falha IA"
