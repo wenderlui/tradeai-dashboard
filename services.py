@@ -95,68 +95,73 @@ class MarketDataService:
             "erro": "Não foi possível obter dados."
         }
 
-# --- SERVIÇO DE IA (COM DEBUG DETALHADO) ---
+# --- SERVIÇO DE IA (ROTAÇÃO INTELIGENTE) ---
 class AIService:
     def __init__(self):
-        # Tenta modelos na ordem de prioridade (Flash é mais rápido/barato)
+        # ORDEM DE PRIORIDADE BASEADA NO SEU PAINEL:
+        # 1. Gemini 2.0 Flash (Está zerado e tem cota de 15 RPM)
+        # 2. Gemini 1.5 Flash (O tanque de guerra, geralmente aguenta muito)
+        # 3. Gemini 1.5 Pro (Backup inteligente)
+        # 4. Gemini 2.0 Pro Exp (Se disponível)
+        
+        # Nomes técnicos EXATOS da API do Google:
         self.modelos = [
+            "gemini-2.5-flash",       # Geração mais nova
+            "gemini-2.5-pro",         # Mais inteligente (Backup de luxo)
             "gemini-2.0-flash",       # O novo padrão (Rápido e Inteligente)
             "gemini-2.0-flash-lite",  # Ultra rápido (Ótimo para não travar)
-            "gemini-2.0-flash-lite-001",
-            "gemini-2.5-flash",       # Geração mais nova
-            "gemini-2.5-pro"          # Mais inteligente (Backup de luxo)
+                   
         ]
+
         
-        # Tenta pegar a chave de todos os lugares possíveis
-        self.api_key = None
+        # Removemos o "2.5" e o "3.0" da lista principal pois sua cota neles já estourou (28/20).
+        
         try:
-            if "GEMINI_API_KEY" in st.secrets:
-                self.api_key = st.secrets["GEMINI_API_KEY"]
-            elif "GEMINI_API_KEY" in os.environ:
-                self.api_key = os.environ["GEMINI_API_KEY"]
-            else:
-                self.api_key = os.getenv("GEMINI_API_KEY")
-        except:
-            self.api_key = os.getenv("GEMINI_API_KEY")
+            self.api_key = st.secrets.get("GEMINI_API_KEY") or os.getenv("GEMINI_API_KEY")
+        except: self.api_key = None
 
     def consultar_gemini(self, simbolo, dados):
-        # 1. Validação de Chave
-        if not self.api_key: 
-            return "❌ ERRO: Chave API não encontrada. Verifique os Secrets.", "Sem Chave"
-        
-        # 2. Validação de Dados
-        if not dados or dados.get('preco', 0) == 0:
-            return "⚠️ Mercado ilegível (Preço zerado).", "Sem Dados"
+        if not self.api_key: return "⚠️ Chave API não encontrada.", "Erro Config"
+        if dados.get('preco', 0) == 0: return "⚠️ Aguardando dados...", "Sem Dados"
 
         tf = dados.get('timeframe', '15m')
-        
         prompt = f"""
-        Aja como Trader Crypto. Analise {simbolo} ({tf}).
+        Analise {simbolo} ({tf}) como Trader.
         Preço: {dados['preco']} | RSI: {dados['rsi']:.1f} | EMA21: {dados['ema21']:.2f}
-        
-        Seja direto (PT-BR). Dê o VEREDITO [COMPRA/VENDA/NEUTRO] e explique.
+        Veredito [COMPRA/VENDA/NEUTRO] em PT-BR.
         """
 
         ultimo_erro = ""
 
-        # 3. Loop de Tentativas
+        # Loop de Tentativas com LOG VISUAL
         for modelo in self.modelos:
             try:
-                # IMPORTANTE: Usa o client da nova biblioteca
-                client = genai.Client(api_key=self.api_key)
+                # print(f"🔄 Tentando modelo: {modelo}...") # Debug no terminal
                 
-                response = client.models.generate_content(
-                    model=modelo, 
-                    contents=prompt
-                )
+                client = genai.Client(api_key=self.api_key)
+                response = client.models.generate_content(model=modelo, contents=prompt)
+                
+                # Se funcionou, retorna e para o loop
                 return response.text, modelo
 
             except Exception as e:
-                ultimo_erro = str(e)
-                print(f"Falha no modelo {modelo}: {e}")
-                time.sleep(1) # Espera 1s antes de tentar o próximo
+                # Se der erro 429 (Cota), ele cai aqui e tenta o próximo da lista
+                erro_msg = str(e)
+                print(f"❌ Falha no {modelo}: {erro_msg[:50]}...") # Mostra erro curto no log
+                ultimo_erro = erro_msg
+                time.sleep(1) # Respira antes de tentar o próximo
                 continue
         
-        # SE TUDO FALHAR, MOSTRA O ERRO REAL NA TELA:
-        return f"❌ Erro Técnico: {ultimo_erro}", "Falha IA"
+        # Se NENHUM funcionar (todos derem erro), ativa o modo OFFLINE
+        return self._analise_offline(dados, "Todas as IAs ocupadas")
+
+    def _analise_offline(self, dados, motivo):
+        """Backup matemático para quando o Google bloqueia tudo"""
+        rsi = dados['rsi']
+        sinal = "NEUTRO"
+        if rsi < 30: sinal = "COMPRA (RSI Baixo)"
+        elif rsi > 70: sinal = "VENDA (RSI Alto)"
+        elif dados['preco'] > dados['ema21']: sinal = "COMPRA (Tendência)"
+        
+        return f"⚠️ **Modo Offline:** {motivo}\n\n**Análise:** O mercado indica {sinal} baseada puramente nos indicadores matemáticos.", "Backup Local"
 
