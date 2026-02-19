@@ -136,4 +136,40 @@ def card_html(titulo, valor, sub, icone, cor_sub=""):
     """
 
 with col1:
-    st.markdown(card_html(f"Preço
+    # Esta linha abaixo precisa ser UMA ÚNICA LINHA, sem quebras
+    st.markdown(card_html(f"Preço ({simbolo_tecnico[:3]})", f"{dados['preco']:,.4f}", f"RSI: {dados['rsi']:.1f}", "💲"), unsafe_allow_html=True)
+
+with col2:
+    if dados['ema21'] > 0:
+        var_simulada = (dados['preco'] - dados['ema21']) / dados['ema21'] * 100
+    else:
+        var_simulada = 0.0
+    
+    cor_var = "green-text" if var_simulada > 0 else "red-text"
+    icone_var = "📈" if var_simulada > 0 else "📉"
+    
+    # Esta linha também deve ser única
+    st.markdown(card_html(f"Tendência ({tempo_selecionado})", f"{dados['preco']:,.4f}", f"{var_simulada:+.2f}% vs EMA21", icone_var, cor_var), unsafe_allow_html=True)
+
+with col3:
+    st.markdown(f"""
+    <div class="metric-card">
+        <div class="icon-box">⚡</div>
+        <div class="metric-label">Sentimento IA</div>
+        <div class="metric-value" style="font-size: 20px;">{sentimento}</div>
+        <div class="metric-sub">Probabilidade: {dados['probabilidade']}%</div>
+    </div>
+    """, unsafe_allow_html=True)
+
+with col4:
+    indice = int(dados['probabilidade'])
+    lbl_indice = "Medo Extremo" if indice < 30 else "Ganância" if indice > 70 else "Neutro"
+    st.markdown(f"""
+    <div class="metric-card">
+        <div class="icon-box">🌐</div>
+        <div class="metric-label">Medo & Ganância</div>
+        <div class="metric-value">{indice}/100</div>
+        <div class="metric-sub">{lbl_indice}</div>
+    </div>
+    """, unsafe_allow_html=True)
+
