@@ -98,7 +98,12 @@ class MarketDataService:
 # --- SERVIÇO DE IA (INTEGRADO) ---
 class AIService:
     def __init__(self):
-        self.modelos = ["gemini-1.5-flash", "gemini-2.0-flash", "gemini-1.5-pro"]
+        self.modelos = [
+            "gemini-2.0-flash",       # O novo padrão (Rápido e Inteligente)
+            "gemini-2.0-flash-lite",  # Ultra rápido (Ótimo para não travar)
+            "gemini-2.5-flash",       # Geração mais nova
+            "gemini-2.5-pro"          # Mais inteligente (Backup de luxo)
+        ]
         try:
             self.api_key = st.secrets.get("GEMINI_API_KEY") or os.getenv("GEMINI_API_KEY")
         except: self.api_key = None
@@ -132,3 +137,4 @@ class AIService:
                 continue
         
         return "⚠️ IA indisponível no momento.", "Erro IA"
+
