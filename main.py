@@ -15,7 +15,7 @@ st.markdown("""
 <style>
     .stApp { background-color: #0b0e11; color: #ffffff; }
     .block-container { padding-top: 6rem; padding-bottom: 5rem; max-width: 1400px; }
-    .btn-align { margin-top: 0px; }
+    .btn-align { margin-top: -5px; }
     .btn-green button {
         background-color: #00c853 !important; color: white !important;
         border: 1px solid #00e676 !important; font-weight: bold !important; height: 42px !important;
@@ -261,5 +261,6 @@ html_tv = f"""
 </div>
 """
 components.html(html_tv, height=500)
+
 
 
