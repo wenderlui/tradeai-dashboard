@@ -102,6 +102,7 @@ class AIService:
         self.modelos = [
             "gemini-2.0-flash",       # O novo padrão (Rápido e Inteligente)
             "gemini-2.0-flash-lite",  # Ultra rápido (Ótimo para não travar)
+            "gemini-2.0-flash-lite-001",
             "gemini-2.5-flash",       # Geração mais nova
             "gemini-2.5-pro"          # Mais inteligente (Backup de luxo)
         ]
@@ -158,3 +159,4 @@ class AIService:
         
         # SE TUDO FALHAR, MOSTRA O ERRO REAL NA TELA:
         return f"❌ Erro Técnico: {ultimo_erro}", "Falha IA"
+
