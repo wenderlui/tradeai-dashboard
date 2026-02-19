@@ -14,7 +14,7 @@ st.set_page_config(page_title="TradeAI Pro", page_icon="📈", layout="wide")
 st.markdown("""
 <style>
     .stApp { background-color: #0b0e11; color: #ffffff; }
-    .block-container { padding-top: 2rem; padding-bottom: 5rem; max-width: 1400px; }
+    .block-container { padding-top: 6rem; padding-bottom: 5rem; max-width: 1400px; }
     .btn-align { margin-top: 28px; }
     .btn-green button {
         background-color: #00c853 !important; color: white !important;
@@ -261,3 +261,4 @@ html_tv = f"""
 </div>
 """
 components.html(html_tv, height=500)
+
