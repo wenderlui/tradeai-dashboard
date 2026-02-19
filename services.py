@@ -113,15 +113,6 @@ class AIService:
                 
                 client = genai.Client(api_key=self.api_key)
                 
-                # Configuração para gastar menos tokens (baratear o custo)
-                response = client.models.generate_content(
-                    model=modelo, 
-                    contents=prompt,
-                    config=types.GenerateContentConfig(
-                        max_output_tokens=150, # Resposta curta
-                        temperature=0.5
-                    )
-                )
                 
                 # Se deu certo, retorna imediatamente
                 return response.text, modelo
@@ -150,3 +141,4 @@ class AIService:
         elif dados['preco'] > dados['ema21']: sinal = "COMPRA (Tendência de Alta)"
         
         return f"⚠️ **Modo Offline:** {motivo}\n\n**Análise Matemática:** O mercado indica {sinal} baseado nos indicadores técnicos.", "Backup Local"
+
