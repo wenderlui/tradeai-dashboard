@@ -2,158 +2,129 @@ import ccxt
 import pandas as pd
 import os
 from google import genai
-from dotenv import load_dotenv, find_dotenv # Adicionei find_dotenv
-import streamlit as st
+from dotenv import load_dotenv, find_dotenv
 import time
 
-# Carrega as variáveis de ambiente forçando a busca do arquivo
-load_dotenv(find_dotenv()) 
+load_dotenv(find_dotenv())
 
-# --- DIAGNÓSTICO (Aparecerá no terminal preto) ---
-chave_teste = os.getenv("GEMINI_API_KEY")
-if chave_teste:
-    print(f"✅ SUCESSO: Chave encontrada! (Começa com: {chave_teste[:5]}...)")
-else:
-    print("❌ ERRO CRÍTICO: O arquivo .env não foi lido ou a chave não está lá.")
-# -------------------------------------------------
-
+# --- SERVIÇO DE DADOS (BINANCE OFICIAL) ---
 class MarketDataService:
-# ... (o resto do código continua igual)
-    """
-    Responsável por buscar dados brutos (Kraken) e calcular indicadores matemáticos.
-    """
     def __init__(self):
-        self.exchange = ccxt.kraken()
+        # Binance é a melhor para POL atualmente
+        self.exchange = ccxt.binance({
+            'enableRateLimit': True,
+        })
 
-    def _resolver_simbolo(self, symbol_bybit):
-        """Traduz o símbolo da UI (Bybit) para o Data Provider (Kraken)"""
-        mapa = {
-            "BTCUSDT": "BTC/USD", "ETHUSDT": "ETH/USD", "SOLUSDT": "SOL/USD",
-            "XRPUSDT": "XRP/USD", "BNBUSDT": "BNB/USD", "DOGEUSDT": "DOGE/USD",
-            "ADAUSDT": "ADA/USD", "AVAXUSDT": "AVAX/USD", "DOTUSDT": "DOT/USD",
-            "LINKUSDT": "LINK/USD", "TRXUSDT": "TRX/USD", "POLUSDT": "POL/USD",
-            "LTCUSDT": "LTC/USD", "BCHUSDT": "BCH/USD"
-        }
-        if symbol_bybit in mapa: return mapa[symbol_bybit]
-        # Lógica genérica para moedas manuais
-        base = symbol_bybit.upper().replace("USDT", "").replace("USD", "")
-        return f"{base}/USD"
-
-    def _calcular_probabilidade(self, df):
-        """Algoritmo proprietário de decisão (0 a 100%)"""
-        if len(df) < 50: return 50
-        score = 50
-        last = df.iloc[-1]
+    def _resolver_simbolo(self, simbolo_entrada):
+        s = str(simbolo_entrada).upper().strip().replace(" ", "")
         
-        # Regra 1: RSI (Oscilador)
-        if last['rsi'] < 30: score += 20
-        elif last['rsi'] > 70: score -= 20
-        elif last['rsi'] > 55: score -= 5
-        elif last['rsi'] < 45: score += 5
-
-        # Regra 2: Cruzamento de Médias (Tendência Curta)
-        if last['ema9'] > last['ema21']: score += 20
-        else: score -= 20
+        # Correção Forçada para POL/MATIC
+        if s in ["POL", "POLUSDT", "POL/USDT"]:
+            return "POL/USDT"
         
-        # Regra 3: Tendência Longa
-        if last['close'] > last['ema50']: score += 10
-        else: score -= 10
+        # Mapa padrão
+        if s == "BTC": return "BTC/USDT"
+        if s == "ETH": return "ETH/USDT"
         
-        return max(0, min(100, score))
+        # Formatação Genérica
+        if "/" not in s:
+            if s.endswith("USDT"):
+                return s.replace("USDT", "/USDT")
+            else:
+                return f"{s}/USDT"
+        return s
 
-    def obter_dados_tecnicos(self, symbol_bybit):
-        """Método principal chamado pelo Front-end"""
+    # Agora aceita o parametro 'timeframe'
+    def obter_dados_tecnicos(self, simbolo_entrada, timeframe='15m'):
+        symbol_fmt = self._resolver_simbolo(simbolo_entrada)
+        print(f"🔍 Buscando {symbol_fmt} no tempo {timeframe}...")
+
         try:
-            symbol_kraken = self._resolver_simbolo(symbol_bybit)
-            candles = self.exchange.fetch_ohlcv(symbol_kraken, timeframe="15m", limit=100)
+            # Pega candles com o tempo certo (15m, 1h, 4h...)
+            ohlcv = self.exchange.fetch_ohlcv(symbol_fmt, timeframe=timeframe, limit=100)
             
-            if not candles or len(candles) < 50: return None
+            if not ohlcv or len(ohlcv) < 20:
+                print(f"❌ Sem dados para {symbol_fmt}")
+                return None
+                
+            df = pd.DataFrame(ohlcv, columns=['time', 'open', 'high', 'low', 'close', 'volume'])
             
-            df = pd.DataFrame(candles, columns=['time', 'open', 'high', 'low', 'close', 'volume'])
+            # --- CÁLCULOS ---
+            df['delta'] = df['close'].diff()
+            df['gain'] = df['delta'].where(df['delta'] > 0, 0)
+            df['loss'] = -df['delta'].where(df['delta'] < 0, 0)
             
-            # Cálculos Vetorizados (Pandas)
-            delta = df['close'].diff()
-            gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
-            loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
-            rs = gain / loss
+            avg_gain = df['gain'].rolling(window=14).mean()
+            avg_loss = df['loss'].rolling(window=14).mean()
+            rs = avg_gain / avg_loss
             df['rsi'] = 100 - (100 / (1 + rs))
+            df['rsi'] = df['rsi'].fillna(50)
             
             df['ema9'] = df['close'].ewm(span=9).mean()
             df['ema21'] = df['close'].ewm(span=21).mean()
-            df['ema50'] = df['close'].ewm(span=50).mean()
             
-            # Encapsula o resultado num objeto limpo (DTO)
             ultimo = df.iloc[-1]
+            
+            # Probabilidade
+            prob = 50
+            if ultimo['rsi'] < 30: prob += 20
+            elif ultimo['rsi'] > 70: prob -= 20
+            if ultimo['close'] > ultimo['ema21']: prob += 15
+            
             return {
-                "preco": ultimo['close'],
-                "rsi": ultimo['rsi'],
-                "ema9": ultimo['ema9'],
-                "ema21": ultimo['ema21'],
-                "probabilidade": self._calcular_probabilidade(df)
+                "preco": float(ultimo['close']),
+                "rsi": float(ultimo['rsi']),
+                "ema9": float(ultimo['ema9']),
+                "ema21": float(ultimo['ema21']),
+                "probabilidade": min(max(int(prob), 0), 100)
             }
         except Exception as e:
-            print(f"Erro Service: {e}")
+            print(f"❌ Erro API: {e}")
             return None
 
-# --- SERVIÇO DE IA (COM ROTAÇÃO AUTOMÁTICA CORRIGIDA) ---
+# --- SERVIÇO DE IA (Mantido com melhorias de prompt) ---
 class AIService:
     def __init__(self):
-        # MUDANÇA: O '1.5-flash' vem primeiro porque tem MUITO mais cota que o 2.0
         self.modelos = [
-            "gemini-2.0-flash",       # O novo padrão (Rápido e Inteligente)
-            "gemini-2.0-flash-lite",  # Ultra rápido (Ótimo para não travar)
-            "gemini-2.5-flash",       # Geração mais nova
-            "gemini-2.5-pro"          # Mais inteligente (Backup de luxo)
+            "gemini-1.5-flash", 
+            "gemini-2.0-flash", 
+            "gemini-1.5-pro"
         ]
         
         self.api_key = None
         try:
-            # Tenta pegar a chave de qualquer lugar possível
-            if "GEMINI_API_KEY" in st.secrets: 
-                self.api_key = st.secrets["GEMINI_API_KEY"]
-            else: 
+            if "GEMINI_API_KEY" in os.environ: 
+                self.api_key = os.environ["GEMINI_API_KEY"]
+            else:
                 self.api_key = os.getenv("GEMINI_API_KEY")
-        except: 
-            self.api_key = os.getenv("GEMINI_API_KEY")
+        except: pass
 
     def consultar_gemini(self, simbolo, dados):
-        if not self.api_key:
-            return "⚠️ Configure a GEMINI_API_KEY.", "Erro Config"
+        if not self.api_key: return "⚠️ Configure a GEMINI_API_KEY.", "Erro"
+        if not dados: return "⚠️ Aguardando dados...", "Erro"
 
-        # Validação básica
-        if not dados or dados.get('preco', 0) == 0:
-             return "⚠️ Aguardando dados...", "Sem Dados"
+        # Pega o timeframe que veio do main.py ou usa 15m padrão
+        tf = dados.get('timeframe', '15 min')
 
         prompt = f"""
-        Aja como Trader Crypto. Analise {simbolo}.
-        Preço: {dados['preco']} | RSI: {dados['rsi']:.1f} | EMA21: {dados['ema21']:.2f}
-        Probabilidade Alta: {dados['probabilidade']}%
+        Aja como Trader Profissional. Analise o par {simbolo} no gráfico de {tf}.
+        Preço Atual: ${dados['preco']}
+        RSI (14): {dados['rsi']:.1f}
+        Média EMA 21: {dados['ema21']:.2f}
+        Probabilidade Alta Calculada: {dados['probabilidade']}%
         
-        Seja breve (max 3 linhas).
-        VEREDITO: [COMPRA/VENDA/NEUTRO] e motivo.
+        Responda em PT-BR (máx 3 linhas).
+        Dê o VEREDITO [COMPRA / VENDA / NEUTRO] para esse tempo gráfico ({tf}).
+        Cite o RSI e a EMA na justificativa.
         """
 
-        # --- LOOP COM RESPIRO ---
-        for i, modelo_atual in enumerate(self.modelos):
+        for i, modelo in enumerate(self.modelos):
             try:
-                # Cria o cliente
                 client = genai.Client(api_key=self.api_key)
-                
-                # Tenta gerar
-                response = client.models.generate_content(
-                    model=modelo_atual,
-                    contents=prompt
-                )
-                return response.text, modelo_atual
-
+                response = client.models.generate_content(model=modelo, contents=prompt)
+                return response.text, modelo
             except Exception as e:
-                # SE FALHAR: Espera um pouco antes de tentar o próximo!
-                tempo_espera = 2 * (i + 1) # Espera 2s, depois 4s, depois 6s...
-                print(f"⚠️ {modelo_atual} falhou. Esperando {tempo_espera}s...")
-                time.sleep(tempo_espera) # <--- AQUI ESTÁ O SEGREDO
-                continue 
+                time.sleep(1 + i) # Espera progressiva
+                continue
         
-        return "⚠️ Cota excedida em todos. Tente em 2 min.", "Falha Total"
-
-
-
+        return "⚠️ Cota excedida. Tente em 1 min.", "Falha"
