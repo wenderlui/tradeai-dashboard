@@ -105,14 +105,19 @@ class AIService:
 
         ultimo_erro = ""
 
-        # LOOP DE TENTATIVAS COM TOAST
+       # LOOP DE TENTATIVAS COM TOAST
         for i, modelo in enumerate(self.modelos):
             try:
-                # Aviso visual (Some em 2 segundos)
+                # Aviso visual na interface
                 # st.toast(f"🔄 Tentando IA {i+1}: {modelo}...", icon="🤖")
                 
                 client = genai.Client(api_key=self.api_key)
                 
+                # A LINHA QUE FALTAVA: Chamada real para a API do Gemini
+                response = client.models.generate_content(
+                    model=modelo,
+                    contents=prompt
+                )
                 
                 # Se deu certo, retorna imediatamente
                 return response.text, modelo
@@ -121,9 +126,9 @@ class AIService:
                 erro_curto = str(e)
                 if "429" in erro_curto: erro_curto = "Cota Excedida (429)"
                 
-                # Mostra o erro na tela para você ver a troca acontecendo
+                # Mostra o erro no terminal para você debugar
                 print(f"❌ {modelo} falhou: {erro_curto}")
-                st.toast(f"❌ {modelo} falhou. Trocando...", icon="⚠️")
+                # st.toast(f"❌ {modelo} falhou. Trocando...", icon="⚠️")
                 
                 ultimo_erro = erro_curto
                 time.sleep(2) # Espera 2s para garantir
@@ -141,4 +146,5 @@ class AIService:
         elif dados['preco'] > dados['ema21']: sinal = "COMPRA (Tendência de Alta)"
         
         return f"⚠️ **Modo Offline:** {motivo}\n\n**Análise Matemática:** O mercado indica {sinal} baseado nos indicadores técnicos.", "Backup Local"
+
 
