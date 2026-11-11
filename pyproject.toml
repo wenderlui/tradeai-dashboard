@@ -1,0 +1,17 @@
+[project]
+name = "tradeai-dashboard"
+version = "2.0.0"
+description = "Dashboard de análise técnica de criptomoedas com IA (Streamlit + Gemini)"
+requires-python = ">=3.10"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP"]
+ignore = ["E501"]

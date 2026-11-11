@@ -12,3 +12,6 @@ __pycache__/
 venv/
 env/
 .venv/
+# Testes e lint
+.pytest_cache/
+.ruff_cache/
